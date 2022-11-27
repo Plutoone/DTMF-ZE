@@ -18,14 +18,18 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
 #include "i2c.h"
 #include "tim.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "oled.h"
 #include "task.h"
+#include "DTMF.h"
+#include "stdio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -89,8 +93,14 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   MX_TIM6_Init();
+  MX_ADC1_Init();
+  MX_TIM7_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 	HAL_TIM_Base_Start_IT(&htim6);
+	HAL_TIM_Base_Start_IT(&htim7);
+	HAL_ADCEx_Calibration_Start(&hadc1);
+	HAL_ADC_Start(&hadc1);
 	
 	OLED_Init();
 	OLED_Clear();
@@ -107,7 +117,6 @@ int main(void)
 		if(flag == 1)
 		{
 			flag = 0;
-
 			AllTask();
 		}
   }
@@ -122,6 +131,7 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -151,15 +161,63 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+  {
+    Error_Handler();
+  }
 }
 
 /* USER CODE BEGIN 4 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
+	static int ADC_ConvData=0;
+	static uint8_t time = 0;
+	static uint8_t N_NextCode = 0;
 	if(htim->Instance == TIM6)
 	{
 		flag = 1;
 	}
+	if(htim->Instance == TIM7)
+	{
+//		HAL_ADC_Start(&hadc1);
+//		while(!ADC_FLAG_EOC);
+		ADC_ConvData=HAL_ADC_GetValue(&hadc1);
+//		HAL_ADC_Stop(&hadc1);
+		
+		time++;
+		if(key_value==0||key_value==1)
+			
+		{		
+			if(ADC_ConvData<0x377)	//0x377 == D(887) 用于判断是否是静音，887是认为设定的AD阀值
+			{
+				N_NextCode++;
+			}
+			
+			if(time==160)	//160次相当于20ms
+			{
+				if(N_NextCode >= 152)  next_code=1;	//当20ms内有95%的值小于门限值，则认为有静音，可以判定有下一个码值
+				time=0;	  //20ms后各个值复位
+				N_NextCode=0;
+			}
+		
+//		printf("%d\n ", ADC_ConvData);
+//		filter_ADCData=filter(b,48, (float)ADC_ConvData);
+//		printf("%f  \n", filter_ADCData);
+//		DTMF_Decode(filter_ADCData);
+     		DTMF_Decode(ADC_ConvData - 2048);
+		
+			if(N_decode>110) N_decode = 1;	 //抗噪声8db
+		}
+	}
+}
+	
+
+int fputc(int ch,FILE *f)
+{
+	HAL_UART_Transmit (&huart1 ,(uint8_t *)&ch,1,HAL_MAX_DELAY );
+	return ch;
 }
 
 /* USER CODE END 4 */
